@@ -1,0 +1,103 @@
+networks:
+  zabbix-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          ip_range: 172.20.240.0/20
+
+volumes:
+  snmptraps:
+  mibs:
+  ssl_certs:
+  postgres-data:
+
+services:
+  postgres-server:
+    image: postgres:latest
+    container_name: postgres-server
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_pwd
+      POSTGRES_DB: zabbix
+    networks:
+      - zabbix-net
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  zabbix-snmptraps:
+    image: zabbix/zabbix-snmptraps:alpine-7.2-latest
+    container_name: zabbix-snmptraps
+    volumes:
+      - snmptraps:/var/lib/zabbix/snmptraps:rw
+      - mibs:/usr/share/snmp/mibs:ro
+    networks:
+      - zabbix-net
+    ports:
+      - "162:1162/udp"
+    restart: unless-stopped
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.2-latest
+    container_name: zabbix-server-pgsql
+    environment:
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_pwd
+      POSTGRES_DB: zabbix
+      ZBX_ENABLE_SNMP_TRAPS: "true"
+    volumes_from:
+      - zabbix-snmptraps
+    networks:
+      - zabbix-net
+    ports:
+      - "10051:10051"
+    restart: unless-stopped
+    depends_on:
+      - postgres-server
+      - zabbix-snmptraps
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.2-latest
+    container_name: zabbix-web-nginx-pgsql
+    environment:
+      ZBX_SERVER_HOST: zabbix-server-pgsql
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_pwd
+      POSTGRES_DB: zabbix
+    volumes:
+      - ssl_certs:/etc/ssl/nginx:ro
+    networks:
+      - zabbix-net
+    ports:
+      - "20080:8080"
+      - "20443:8443"
+    restart: unless-stopped
+    depends_on:
+      - zabbix-server
+
+  zabbix-agent2:
+    image: zabbix/zabbix-agent2:alpine-7.2-latest
+    container_name: zabbix-agent2
+    env_file:
+      - .env
+    environment:
+      ZBX_HOSTNAME: "zabbix.server"
+      ZBX_SERVER_HOST: ${ZABBIX_SERVER_IP}
+      ZBX_PASSIVE_ALLOW: "true"
+      ZBX_ACTIVE_ALLOW: "true"
+      ZBX_TLSCONNECT: "psk"
+      ZBX_TLSACCEPT: "psk"
+      ZBX_TLSPSKFILE: "/var/lib/zabbix/enc/zabbix-agent.psk"
+      ZBX_TLSPSKIDENTITY: ${ZABBIX_AGENT_PSK_ID}
+      ZBX_PASSIVESERVERS: "0.0.0.0/0"
+    ports:
+      - "10050:10050"
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - ./psk:/var/lib/zabbix/enc:ro
+    networks:
+      - zabbix-net 

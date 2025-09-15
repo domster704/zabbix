@@ -1,0 +1,16 @@
+services:
+  zabbix-proxy:
+    image: zabbix/zabbix-proxy-sqlite3:alpine-7.2-latest
+    container_name: zabbix-proxy
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ZBX_HOSTNAME: zabbix-proxy-vpn
+      ZBX_SERVER_HOST: ${ZABBIX_SERVER_IP}
+      ZBX_SERVER_PORT: 10051
+      ZBX_DEBUGLEVEL: 3
+      ZBX_PROXYMODE: 0
+    volumes:
+      - ./zbx-sqlite-data:/var/lib/zabbix/db_data
+    network_mode: "container:open-balena-vpn-1"
